@@ -23,9 +23,18 @@ def _extract_search_query(msg: str) -> str:
 def _needs_web(msg: str) -> bool:
     """
     Heuristic: decide if this user message should force a web search.
-    Triggers on queries that likely require up-to-date or external facts.
+    Triggers only on queries that plausibly require fresh/external info.
+    Avoid forcing for simple arithmetic/math expressions.
     """
     m = msg.lower().strip()
+
+    # If it's basically a math calculation, don't force web
+    # Strip common lead-ins and check remaining characters
+    mathy = re.sub(r"\b(what's|what is|calculate|compute|solve|evaluate)\b", "", m)
+    mathy = mathy.replace("x", "*").replace("×", "*")
+    if re.fullmatch(r"[0-9\.\s\+\-\*\/\^\(\)]+", mathy):
+        return False
+
     keywords = [
         "latest", "news", "update", "updates", "recent", "trend", "trends",
         "who is", "what is", "when was", "history", "timeline", "background",
@@ -35,16 +44,13 @@ def _needs_web(msg: str) -> bool:
         "conference", "paper", "research", "breakthrough", "state of the art",
         "sota", "benchmarks", "dataset", "github", "repo", "repository"
     ]
-    # Fast checks
     if any(k in m for k in keywords):
         return True
-    # Simple question forms
-    if m.endswith("?"):
-        return True
-    # If the message explicitly asks to search/find/lookup, we already handle elsewhere,
-    # but still return True to force web use.
+
+    # Explicit verbs asking to use web search
     if re.search(r"\b(search( the web)?( for)?|find|look\s*up|lookup)\b", m):
         return True
+
     return False
 
 async def _summarize(model, query: str, snippets: str) -> str:
@@ -116,8 +122,8 @@ async def main():
 
     # A batch of user messages; the agent will decide which MCP tool to call per message
     user_messages = [
-        # "what's (3 + 5) x 12?",
-        # "What's the current weather in San Francisco, US?",
+        "what's (3 + 5) x 12?",
+        "What's the current weather in San Francisco, US?",
         "Search the web for latest news on AI research breakthroughs.",
         # "Find top 5 programming tutorials for beginners.",
         # "Look up the history of Python programming language.",
