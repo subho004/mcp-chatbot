@@ -10,6 +10,7 @@ mcp = FastMCP("Weather")
 @mcp.tool()
 async def get_weather(location: str) -> str:
     """Get current weather for a location using WeatherAPI.com."""
+    print(f"[Weather Tool] get_weather called with location='{location}'")
     api_key = os.getenv("WEATHER_API_KEY")
     if not api_key:
         return "Error: WEATHER_API_KEY is not set. Set it in your environment or .env file."
@@ -29,6 +30,7 @@ async def get_weather(location: str) -> str:
         humidity = curr.get("humidity")
         wind_kph = curr.get("wind_kph")
         wind_dir = curr.get("wind_dir")
+        print(f"[Weather Tool] WeatherAPI response for '{location}': {temp_c}°C, feels like {feelslike_c}°C, {condition}, humidity {humidity}%, wind {wind_kph} km/h {wind_dir}")
         return (
             f"Weather in {name}:\n"
             f"Condition: {condition}\n"
