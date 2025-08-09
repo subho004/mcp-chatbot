@@ -68,8 +68,8 @@ async def main():
 
     # A batch of user messages; the agent will decide which MCP tool to call per message
     user_messages = [
-        # "what's (3 + 5) x 12?",
-        # "What's the current weather in San Francisco, US?",
+        "what's (3 + 5) x 12?",
+        "What's the current weather in San Francisco, US?",
         "Search the web for latest news on AI research breakthroughs.",
         "Find top 5 programming tutorials for beginners.",
         "Look up the history of Python programming language.",
