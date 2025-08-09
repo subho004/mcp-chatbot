@@ -1,22 +1,19 @@
 # mcp-chatbot
 
-
 > **🔊 Note:** This demo video includes narration — turn on your sound for the full experience.
 
 https://github.com/user-attachments/assets/d9e2ba2b-66d0-4825-a1f0-53260f79a8a1
-
-
 
 `mcp-chatbot` is a modular chatbot framework using **LangChain MCP** (Multi-Component Protocol) that supports:
 
 - Math calculations
 - Weather queries (via WeatherAPI.com)
-- Web search (via DuckDuckGo API)
+- Web search fetching HTML content, parsing with markitdown, enforcing English results, and defaulting to top 3 results
 - Extendable tools via MCP servers
 
 ## Features
 
-- **Multiple MCP servers** (`mathserver.py`, `weather.py`, `search.py`)
+- **Multiple MCP servers** (`weather.py`) — mathserver and search are integrated tools
 - Easy to extend with new tools
 - Async agent orchestration using LangGraph + LangChain
 - Environment variable support via `.env`
@@ -61,12 +58,20 @@ https://github.com/user-attachments/assets/d9e2ba2b-66d0-4825-a1f0-53260f79a8a1
 
 ## ▶️ Running the MCP Servers
 
-Only the weather tool needs to be run as an MCP server. The math and search tools are integrated and run normally without requiring separate servers.
+Only the weather tool needs to be run as an MCP server. The mathserver and search tools are integrated directly as tools within the client and do not require separate servers.
 
 **Weather Server**
 
 ```bash
 python src/servers/weather.py
+```
+
+**Search Tool**
+
+The search tool is integrated directly within the client and does not require a separate server. However, you can run it standalone for testing purposes:
+
+```bash
+python src/servers/search.py
 ```
 
 ---
@@ -81,9 +86,10 @@ python src/client.py
 
 The client will:
 
-- Connect to all running MCP servers
-- Pass user messages to the agent
-- Dynamically call tools based on message content
+- Connect to the running MCP weather server
+- Use integrated math and search tools directly
+- Pass user messages to the agent, which decides whether to call math, weather, or search tools
+- Summarize search results for user-friendly responses
 
 ---
 
@@ -101,7 +107,7 @@ Humidity: 60%
 Wind: 10 km/h NW
 
 User: Search the web for history of Python programming language
-Bot: 1. ...
+Bot: Python is a high-level, interpreted programming language known for its readability and versatility. It was created by Guido van Rossum and first released in 1991. Python supports multiple programming paradigms and has a large standard library.
 ```
 
 ---
@@ -133,3 +139,4 @@ Bot: 1. ...
 - Ensure each server is running before starting the client.
 - MCP uses standard input/output or HTTP transport — keep ports unique if using HTTP.
 - For debugging, `print()` statements in server functions appear in the terminal running that server.
+- The search tool uses the `ddgs` library and markitdown to fetch and parse HTML content, enforces English language results, strips links, and returns only the top 3 results by default.
