@@ -10,6 +10,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import asyncio
+from groq import BadRequestError
+
+def _extract_search_query(msg: str) -> str:
+    s = msg.strip()
+    s = re.sub(r"^(search( the web)?( for)?|find|look up|lookup)\s+", "", s, flags=re.I)
+    s = re.sub(r"^for\s+", "", s, flags=re.I)
+    s = re.sub(r"^the\s+", "", s, flags=re.I)
+    s = re.sub(r"[.?!]+$", "", s)
+    return s.strip()
 
 async def main():
     BASE_DIR = Path(__file__).resolve().parent
@@ -17,17 +26,20 @@ async def main():
 
     client=MultiServerMCPClient(
         {
-            "math":{
-                "command":"python",
-                "args":[MATH_SERVER], ## Ensure correct absolute path
-                "transport":"stdio",
-            
+            "math": {
+                "command": "python",
+                "args": [MATH_SERVER],  # Ensure correct absolute path
+                "transport": "stdio",
             },
             "weather": {
                 "url": "http://localhost:8000/mcp",  # Ensure server is running here
                 "transport": "streamable_http",
+            },
+            "search": {
+                "command": "python",
+                "args": [str(BASE_DIR / "servers" / "search.py")],
+                "transport": "stdio",
             }
-
         }
     )
 
@@ -50,13 +62,17 @@ async def main():
         "For any query about weather, temperature, forecast, conditions, humidity, wind, or a city/location, you MUST call the MCP tool `get_weather` with a `location` argument. "
         "Never nest tool calls inside another tool's parameters. Use multiple sequential tool calls instead (e.g., call `add` to get a number, then call `multiple` with that result). "
         "Your FINAL answer must be plain natural language with no tool-call tags, XML, or function markup."
+        " For queries containing 'search', 'find', or 'look up', you MUST call the MCP tool `web_search`."
+        " When calling `web_search`, pass an integer for `max_results` (e.g., 5), not a string."
     )
 
     # A batch of user messages; the agent will decide which MCP tool to call per message
     user_messages = [
-        "what's (3 + 5) x 12?",
-        "What's the current weather in San Francisco, US?",
-        # add more items here; the agent will pick tools as needed
+        # "what's (3 + 5) x 12?",
+        # "What's the current weather in San Francisco, US?",
+        "Search the web for latest news on AI research breakthroughs.",
+        "Find top 5 programming tutorials for beginners.",
+        "Look up the history of Python programming language.",
     ]
 
     for i, msg in enumerate(user_messages, start=1):
@@ -68,9 +84,35 @@ async def main():
             )},
             {"role": "user", "content": msg},
         ]
-        result = await agent.ainvoke({"messages": base_messages})
-        final_text = result['messages'][-1].content
-        # Fallback: if the model returned tool-call markup, ask it to reformat
+        try:
+            result = await agent.ainvoke({"messages": base_messages})
+            final_text = result['messages'][-1].content
+        except Exception as e:
+            # If the agent's tool call failed, try a direct MCP tool fallback for search or weather
+            err_txt = str(e)
+            print("Agent error:", err_txt)
+            final_text = None
+            if any(k in msg.lower() for k in ["search", "find", "look up", "news"]):
+                # direct search fallback
+                try:
+                    search_tool = next(t for t in tools if t.name == "web_search")
+                    topic = _extract_search_query(msg)
+                    sr = await search_tool.ainvoke({"query": topic, "max_results": 5})
+                    final_text = sr
+                except Exception as se:
+                    final_text = f"Search failed: {se}"
+            elif any(k in msg.lower() for k in ["weather", "temperature", "forecast"]):
+                try:
+                    wtool = next(t for t in tools if t.name == "get_weather")
+                    # naive location extraction: use whole message; your agent usually provides city explicitly
+                    sr = await wtool.ainvoke({"location": msg})
+                    final_text = sr
+                except Exception as we:
+                    final_text = f"Weather failed: {we}"
+            else:
+                final_text = "Sorry, I had trouble answering that."
+
+        # Reformat if the model returned tool-call markup
         if isinstance(final_text, str) and "<function=" in final_text:
             try:
                 reformatted = await model_plain.ainvoke([
@@ -82,10 +124,10 @@ async def main():
                     AIMessage(content=final_text),
                 ])
                 final_text = reformatted.content
-            except Exception as e:
-                print("Reformat fallback failed:", e)
-                # Very basic sanitization: strip tool tags if present
+            except Exception as e2:
+                print("Reformat fallback failed:", e2)
                 final_text = re.sub(r"</?function[^>]*>", "", final_text)
+
         print(f"Message {i} response:", final_text)
 
 asyncio.run(main())
