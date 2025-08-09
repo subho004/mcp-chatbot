@@ -1,71 +1,129 @@
-from typing import List
 from mcp.server.fastmcp import FastMCP
-import requests
-import urllib.parse
+from ddgs import DDGS
+from markitdown import MarkItDown
+import sys, re
 
 mcp = FastMCP("Search")
 
+def _log(msg: str):
+    # stderr only so we don't break stdio transport
+    print(f"[Search Tool] {msg}", file=sys.stderr, flush=True)
+
+def _strip_links(md_text: str) -> str:
+    """
+    Remove images, markdown links, and bare URLs from Markdown -> plain text.
+    (We only regex clean the Markdown that MarkItDown produced, not the HTML.)
+    """
+    if not md_text:
+        return ""
+    text = md_text
+    # Remove images: ![alt](url)
+    text = re.sub(r'!\[[^\]]*\]\([^)]+\)', '', text)
+    # Replace markdown links [label](url) -> label
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    # Drop bare URLs
+    text = re.sub(r'https?://\S+', '', text)
+    # Clean common markdown prefixes (#, >, -, *)
+    text = re.sub(r'^[#>\-\*\s]+\s*', '', text, flags=re.MULTILINE)
+    # Collapse whitespace/newlines
+    text = re.sub(r'[ \t\f\v]+', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text).strip()
+    return text
+
 @mcp.tool()
-async def web_search(query: str, max_results: int | str = 5) -> str:
+async def web_search(query: str, max_results: int = 5, include_content: bool | int = True) -> str:
     """
-    Search the web using DuckDuckGo's unofficial API.
-    Returns up to `max_results` results with title and URL.
+    Minimal web search:
+      - DDGS top results
+      - MarkItDown -> Markdown
+      - Strip links -> plain text
+      - Return up to `max_results` blocks (default 1)
+    `include_content`:
+      - True -> include ~1200 chars per page
+      - False/0 -> just the title (no page fetch)
+      - int -> that many chars per page (cap ~4000)
     """
-    print(f"[Search Tool] web_search called with query='{query}', max_results={max_results}")
+    _log(f"Searching: {query} (max_results={max_results}, include_content={include_content})")
+
     try:
-        # Coerce and clamp max_results
+        mr = max(1, min(int(max_results), 10))
+    except Exception:
+        mr = 1
+
+    if isinstance(include_content, bool):
+        content_chars = 1200 if include_content else 0
+    else:
         try:
-            mr = int(max_results)
+            content_chars = int(include_content)
         except Exception:
-            mr = 5
-        mr = max(1, min(mr, 10))
-        headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
-        url = "https://api.duckduckgo.com/"
-        params = {"q": query, "format": "json", "no_redirect": 1, "no_html": 1}
-        resp = requests.get(url, params=params, timeout=12, headers=headers)
-        try:
-            data = resp.json()
-        except Exception as je:
-            return f"Error: DuckDuckGo returned non-JSON: {je}"
+            content_chars = 1200
+    content_chars = max(0, min(content_chars, 4000))
 
-        results: List[str] = []
-        # Prefer 'Results' (sometimes contains direct results)
-        for item in data.get("Results", []) or []:
-            txt = item.get("Text")
-            first = item.get("FirstURL") or item.get("Redirect")
-            if txt and first:
-                results.append(f"{txt} - {first}")
-            if len(results) >= mr:
-                break
-
-        # Then 'RelatedTopics'
-        if len(results) < mr:
-            for topic in data.get("RelatedTopics", []) or []:
-                if isinstance(topic, dict):
-                    if "Text" in topic and "FirstURL" in topic:
-                        results.append(f"{topic['Text']} - {topic['FirstURL']}")
-                    elif "Topics" in topic:
-                        for sub in topic["Topics"]:
-                            if "Text" in sub and "FirstURL" in sub:
-                                results.append(f"{sub['Text']} - {sub['FirstURL']}")
-                            if len(results) >= mr:
-                                break
-                if len(results) >= mr:
+    # 1) get top results
+    results = []
+    try:
+        with DDGS() as ddg:
+            for r in ddg.text(query, region="us-en", safesearch="moderate", max_results=mr * 5):
+                title = (r.get("title") or r.get("title_full") or "").strip()
+                href = (r.get("href") or r.get("link") or r.get("url") or "").strip()
+                if title and href:
+                    results.append((title, href))
+                if len(results) >= mr * 2:
                     break
-
-        # Fallback to Abstract
-        if len(results) == 0:
-            abstract = data.get("AbstractText")
-            aurl = data.get("AbstractURL")
-            if abstract and aurl:
-                results.append(f"{abstract} - {aurl}")
-
-        if not results:
-            return "No results found."
-
-        return "\n".join(results[:mr])
     except Exception as e:
-        return f"Error during search: {e}"
+        return f"Search error: {e}"
+
+    if not results:
+        return "No results found."
+
+    # 2) fetch & convert
+    md = MarkItDown()
+    out = []
+    fetched = 0
+    for title, url in results:
+        block = [title]  # plain title line
+
+        if content_chars > 0 and fetched < mr:
+            try:
+                doc = md.convert(url)
+                raw = (getattr(doc, "text_content", "") or "").strip()
+                text = _strip_links(raw)
+                if text:
+                    if len(text) > content_chars:
+                        text = text[: content_chars - 1].rstrip() + "…"
+                    block += ["", text]
+                    fetched += 1
+            except Exception as fe:
+                _log(f"Content fetch skipped for {url}: {fe}")
+
+        out.append("\n".join([b for b in block if b]))
+        if len(out) >= mr:
+            break
+
+    return "\n\n---\n\n".join(out)
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    import sys
+    import argparse
+    import asyncio
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("query", nargs="?", help="Search query")
+    parser.add_argument("--max", type=int, default=5, help="Max results")
+    parser.add_argument("--content", action="store_true", help="Include page content")
+    args = parser.parse_args()
+
+    if args.query:
+        # Direct run mode
+        async def run_direct():
+            results = await web_search(
+                query=args.query,
+                max_results=args.max,
+                include_content=args.content
+            )
+            print(results)
+
+        asyncio.run(run_direct())
+    else:
+        # MCP server mode
+        mcp.run(transport="stdio")
