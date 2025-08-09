@@ -1,5 +1,12 @@
 # mcp-chatbot
 
+
+> **🔊 Note:** This demo video includes narration — turn on your sound for the full experience.
+
+https://github.com/user-attachments/assets/d9e2ba2b-66d0-4825-a1f0-53260f79a8a1
+
+
+
 `mcp-chatbot` is a modular chatbot framework using **LangChain MCP** (Multi-Component Protocol) that supports:
 
 - Math calculations
