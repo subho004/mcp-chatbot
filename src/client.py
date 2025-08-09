@@ -146,7 +146,7 @@ async def main():
             try:
                 search_tool = next(t for t in tools if t.name == "web_search")
                 topic = _extract_search_query(msg) or msg
-                forced_result = await search_tool.ainvoke({"query": topic, "max_results": 5, "include_content": True})
+                forced_result = await search_tool.ainvoke({"query": topic, "max_results": 3, "include_content": True})
                 forced_web = True
             except Exception as fe:
                 print("Forced web_search failed:", fe)
@@ -168,7 +168,7 @@ async def main():
                 try:
                     search_tool = next(t for t in tools if t.name == "web_search")
                     topic = _extract_search_query(msg)
-                    sr = await search_tool.ainvoke({"query": topic, "max_results": 5, "include_content": True})
+                    sr = await search_tool.ainvoke({"query": topic, "max_results": 3, "include_content": True})
                     final_text = await _summarize(model_plain, msg, sr)
                 except Exception as se:
                     final_text = f"Search failed: {se}"
